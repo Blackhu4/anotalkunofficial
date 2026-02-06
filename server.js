@@ -6,10 +6,10 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
-// JAVÍTÁS: CORS beállítása, hogy a Cloudflare ne blokkolja
+// CORS beállítása (Cloudflare miatt fontos)
 const io = new Server(server, {
     cors: {
-        origin: "*", // Bárhonnan engedélyezzük a csatlakozást
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -21,9 +21,7 @@ let waitingUser = null;
 // --- KONFIGURÁCIÓ ---
 const SPAM_DELAY = 600; 
 const SPAM_LIMIT = 5;
-
-// ... (INNENTŐL A KÓD UGYANAZ, MINT EDDIG VOLT: badWords, filterProfanity, io.on connection...)
-// MÁSOLD BE IDE A RÉGI KÓDOD FOLYTATÁSÁT A "const badWords"-től kezdve!
+const MAX_MSG_LENGTH = 500; // <--- ÚJ: Maximum karakterszám
 
 // --- KÁROMKODÁS LISTA ---
 const badWords = [
@@ -80,6 +78,7 @@ io.on('connection', (socket) => {
     socket.on('message', (msg) => {
         if (!socket.partnerId) return;
 
+        // --- ANTI-SPAM ---
         const now = Date.now();
         const timeDiff = now - socket.lastMsgTime;
 
@@ -103,6 +102,12 @@ io.on('connection', (socket) => {
         socket.lastMsgTime = now;
         if (socket.spamCount > 0) socket.spamCount--; 
 
+        // --- ÚJ: HOSSZ LIMIT VÁGÁS ---
+        if (msg.length > MAX_MSG_LENGTH) {
+            msg = msg.substring(0, MAX_MSG_LENGTH);
+        }
+
+        // --- KÁROMKODÁS SZŰRÉS ---
         const cleanMsg = filterProfanity(msg);
 
         if (msg !== cleanMsg) {

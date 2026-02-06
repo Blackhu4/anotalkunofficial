@@ -36,12 +36,20 @@
         #messages { flex: 1; overflow-y: auto; padding: 20px; list-style: none; margin: 0; display: flex; flex-direction: column; gap: 10px; }
         #messages li { padding: 10px 15px; border-radius: 18px; max-width: 75%; word-wrap: break-word; font-size: 0.95rem; }
         .system { align-self: center; color: #888; font-style: italic; font-size: 0.85em; text-align: center; }
+        
+        /* JAVÍTVA: törölve a # jel a pink elől */
         .debug-msg { align-self: center; color: #d63384; font-family: monospace; font-size: 0.75em; background: #fde8f0; border: 1px solid pink; }
+        
         .me { background: var(--my-msg-bg); color: white; align-self: flex-end; border-bottom-right-radius: 4px !important; }
         .partner { background: var(--stranger-msg-bg); color: var(--text-color); align-self: flex-start; border-bottom-left-radius: 4px !important; }
-        #controls { padding: 15px; display: flex; gap: 10px; border-top: 1px solid #ddd; }
-        input[type="text"] { flex: 1; padding: 12px; border-radius: 25px; border: 1px solid #ccc; outline: none; }
-        #btn-send { padding: 10px 20px; border-radius: 25px; border: none; background: #0084ff; color: white; cursor: pointer; }
+        
+        /* ÚJ STÍLUSOK A SZÁMLÁLÓHOZ */
+        #controls { padding: 15px; display: flex; gap: 10px; border-top: 1px solid #ddd; align-items: center; position: relative; }
+        .input-wrapper { flex: 1; position: relative; display: flex; align-items: center; }
+        input[type="text"] { width: 100%; padding: 12px; padding-right: 60px; border-radius: 25px; border: 1px solid #ccc; outline: none; box-sizing: border-box; }
+        #char-count { position: absolute; right: 15px; font-size: 0.75rem; color: #888; pointer-events: none; }
+        #btn-send { padding: 10px 20px; border-radius: 25px; border: none; background: #0084ff; color: white; cursor: pointer; flex-shrink: 0; }
+
         #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10; backdrop-filter: blur(5px); }
         #nickname-input { padding: 10px; border-radius: 5px; border: none; margin-bottom: 15px; width: 70%; text-align: center; font-size: 1rem; }
         #start-btn { padding: 15px 40px; background: #00c853; color: white; border: none; border-radius: 30px; font-size: 1.2rem; cursor: pointer; }
@@ -74,7 +82,10 @@
     </ul>
 
     <div id="controls">
-        <input id="input" type="text" placeholder="Üzenet..." disabled autocomplete="off" />
+        <div class="input-wrapper">
+            <input id="input" type="text" placeholder="Üzenet..." disabled autocomplete="off" maxlength="500" />
+            <span id="char-count">0/500</span>
+        </div>
         <button id="btn-send" onclick="sendMessage()" disabled>Küldés</button>
     </div>
 
@@ -112,7 +123,8 @@
         discBtn: document.getElementById('disconnect-btn'),
         callBtn: document.getElementById('call-btn'),
         remoteAudio: document.getElementById('remote-audio'),
-        callModal: document.getElementById('call-modal')
+        callModal: document.getElementById('call-modal'),
+        charCount: document.getElementById('char-count') // <--- ÚJ ELEM
     };
 
     let localStream;
@@ -145,6 +157,7 @@
         if (text) {
             socket.emit('message', text);
             elements.input.value = '';
+            elements.charCount.textContent = "0/500"; // <--- Nullázás
         }
     }
 
@@ -158,10 +171,7 @@
 
     // --- DEBUG ÜZENETEK ---
     function logDebug(msg) {
-        // Ez a függvény kiírja a chatbe a technikai infókat
         console.log(msg);
-        // Csak akkor írjuk ki a képernyőre, ha hívás van, ne zavarjon
-        // De most a tesztelés miatt mindig kiírjuk
         addMessage(`🔧 ${msg}`, 'debug-msg');
     }
 
@@ -185,6 +195,10 @@
         elements.startBtn.style.display = 'block';
         elements.nickInput.style.display = 'block';
         elements.status.style.display = 'none';
+        
+        // Reset char count
+        elements.input.value = '';
+        elements.charCount.textContent = "0/500";
     }
 
     socket.on('chat_start', (data) => {
@@ -310,8 +324,6 @@
         // --- DIAGNOSZTIKA ---
         peerConnection.oniceconnectionstatechange = () => {
             logDebug(`Állapot: ${peerConnection.iceConnectionState}`);
-            // checking -> connected -> completed (JÓ)
-            // checking -> failed / disconnected (ROSSZ)
         };
 
         peerConnection.onconnectionstatechange = () => {
@@ -320,7 +332,6 @@
 
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                // logDebug("Új hálózati útvonal (ICE) küldése");
                 socket.emit('signal', { type: 'candidate', candidate: event.candidate });
             }
         };
@@ -328,7 +339,6 @@
         peerConnection.ontrack = (event) => {
             logDebug("Hang sáv megérkezett a partnertől!");
             elements.remoteAudio.srcObject = event.streams[0];
-            // Biztos ami biztos, elindítjuk a lejátszást
             elements.remoteAudio.play().catch(e => logDebug("Autoplay hiba: " + e.message));
         };
     }
@@ -376,6 +386,12 @@
 
     elements.input.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
+    });
+
+    // ÚJ: Számláló frissítése
+    elements.input.addEventListener('input', () => {
+        const currentLength = elements.input.value.length;
+        elements.charCount.textContent = `${currentLength}/500`;
     });
 </script>
 </body>

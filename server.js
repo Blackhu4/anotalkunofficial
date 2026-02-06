@@ -6,7 +6,7 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
-// CORS beállítása (Cloudflare miatt fontos)
+// CORS beállítása (Cloudflare és böngészők miatt)
 const io = new Server(server, {
     cors: {
         origin: "*",
@@ -21,16 +21,18 @@ let waitingUser = null;
 // --- KONFIGURÁCIÓ ---
 const SPAM_DELAY = 600; 
 const SPAM_LIMIT = 5;
-const MAX_MSG_LENGTH = 500; // <--- ÚJ: Maximum karakterszám
+const MAX_MSG_LENGTH = 500; 
 
 // --- KÁROMKODÁS LISTA ---
 const badWords = [
     "bazdmeg", "basszameg", "kurva", "geci", "picsa", 
     "fasz", "szar", "fos", "buzi", "köcsög", "anyád", 
-    "ribanc", "fogyatékos", "cigány", "zsidó", "nigger"
+    "ribanc", "fogyatékos", "cigány", "zsidó", "nigger",
+    "kurv", "gec", "faszfej" // Extra variációk
 ];
 
 function filterProfanity(text) {
+    if (!text) return "";
     let cleanText = text;
     badWords.forEach(word => {
         const regex = new RegExp(word, "gi"); 
@@ -43,14 +45,31 @@ function filterProfanity(text) {
 io.on('connection', (socket) => {
     console.log('Felhasználó csatlakozott:', socket.id);
     
+    // Alapértékek
     socket.warnings = 0;      
     socket.spamCount = 0;     
     socket.lastMsgTime = 0;   
 
     socket.on('find_partner', (nickname) => {
-        let cleanNick = filterProfanity(nickname || 'Ismeretlen');
-        socket.nickname = cleanNick;
+        // --- NÉV ELLENŐRZÉS (ÚJ RÉSZ) ---
+        let rawNick = nickname || 'Ismeretlen';
         
+        // Lefuttatjuk a szűrőt a néven
+        let filteredNick = filterProfanity(rawNick);
+
+        // Ha a szűrt név NEM egyezik az eredetivel (tehát volt benne csúnya szó),
+        // akkor büntetésből átnevezzük "Ismeretlen"-re.
+        if (filteredNick !== rawNick) {
+            socket.nickname = 'Ismeretlen'; 
+        } else {
+            // Ha tiszta volt a név, de túl hosszú (max 15), levágjuk
+            if (filteredNick.length > 15) {
+                filteredNick = filteredNick.substring(0, 15);
+            }
+            socket.nickname = filteredNick;
+        }
+        
+        // Nullázás új keresésnél
         socket.warnings = 0;
         socket.spamCount = 0;
         socket.lastMsgTime = 0;
@@ -102,7 +121,7 @@ io.on('connection', (socket) => {
         socket.lastMsgTime = now;
         if (socket.spamCount > 0) socket.spamCount--; 
 
-        // --- ÚJ: HOSSZ LIMIT VÁGÁS ---
+        // --- HOSSZ LIMIT ---
         if (msg.length > MAX_MSG_LENGTH) {
             msg = msg.substring(0, MAX_MSG_LENGTH);
         }

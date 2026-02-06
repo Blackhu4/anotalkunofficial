@@ -6,6 +6,7 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
+// CORS beállítása (Cloudflare és böngészők miatt)
 const io = new Server(server, {
     cors: {
         origin: "*",
@@ -22,11 +23,12 @@ const SPAM_DELAY = 600;
 const SPAM_LIMIT = 5;
 const MAX_MSG_LENGTH = 500; 
 
+// --- KÁROMKODÁS LISTA ---
 const badWords = [
     "bazdmeg", "basszameg", "kurva", "geci", "picsa", 
     "fasz", "szar", "fos", "buzi", "köcsög", "anyád", 
     "ribanc", "fogyatékos", "cigány", "zsidó", "nigger",
-    "kurv", "gec", "faszfej"
+    "kurv", "gec", "faszfej" , "kuki" , "punci" ,  // Extra variációk
 ];
 
 function filterProfanity(text) {
@@ -41,31 +43,51 @@ function filterProfanity(text) {
 }
 
 io.on('connection', (socket) => {
+    console.log('Felhasználó csatlakozott:', socket.id);
+    
+    // Alapértékek
     socket.warnings = 0;      
     socket.spamCount = 0;     
     socket.lastMsgTime = 0;   
 
     socket.on('find_partner', (nickname) => {
+        // --- NÉV ELLENŐRZÉS (ÚJ RÉSZ) ---
         let rawNick = nickname || 'Ismeretlen';
+        
+        // Lefuttatjuk a szűrőt a néven
         let filteredNick = filterProfanity(rawNick);
 
-        // Név ellenőrzése: Ha csúnya volt, vagy túl hosszú
+        // Ha a szűrt név NEM egyezik az eredetivel (tehát volt benne csúnya szó),
+        // akkor büntetésből átnevezzük "Ismeretlen"-re.
         if (filteredNick !== rawNick) {
             socket.nickname = 'Ismeretlen'; 
         } else {
-            socket.nickname = filteredNick.substring(0, 15);
+            // Ha tiszta volt a név, de túl hosszú (max 15), levágjuk
+            if (filteredNick.length > 15) {
+                filteredNick = filteredNick.substring(0, 15);
+            }
+            socket.nickname = filteredNick;
         }
         
+        // Nullázás új keresésnél
         socket.warnings = 0;
         socket.spamCount = 0;
+        socket.lastMsgTime = 0;
 
         if (waitingUser) {
             const partner = waitingUser;
             waitingUser = null;
+
             socket.partnerId = partner.id;
             partner.partnerId = socket.id;
+            
+            partner.warnings = 0;
+            partner.spamCount = 0;
+
             socket.emit('chat_start', { partnerName: partner.nickname, initiator: true });
             partner.emit('chat_start', { partnerName: socket.nickname, initiator: false });
+
+            console.log(`Pár: ${socket.nickname} <-> ${partner.nickname}`);
         } else {
             waitingUser = socket;
             socket.emit('waiting', 'Keresés...');
@@ -74,28 +96,51 @@ io.on('connection', (socket) => {
 
     socket.on('message', (msg) => {
         if (!socket.partnerId) return;
+
+        // --- ANTI-SPAM ---
         const now = Date.now();
-        if (now - socket.lastMsgTime < SPAM_DELAY) {
+        const timeDiff = now - socket.lastMsgTime;
+
+        if (timeDiff < SPAM_DELAY) {
             socket.spamCount++;
+
             if (socket.spamCount >= SPAM_LIMIT) {
-                socket.emit('message', { text: "Rendszer: SPAM miatt kidobtunk.", from: 'system' });
+                socket.emit('message', { text: "Rendszerüzenet: Túl gyorsan írtál (SPAM)! A kapcsolatot bontottuk.", from: 'system' });
+                const partnerSocket = io.sockets.sockets.get(socket.partnerId);
+                if (partnerSocket) {
+                     io.to(socket.partnerId).emit('message', { text: "Rendszerüzenet: A partnert kizártuk SPAM miatt.", from: 'system' });
+                }
                 handleDisconnect(socket, true); 
                 return;
+            } else {
+                socket.emit('message', { text: `Rendszerüzenet: Túl gyorsan írsz! Lassíts! (${socket.spamCount}/${SPAM_LIMIT})`, from: 'system' });
+                return; 
             }
-            return;
         }
+        
         socket.lastMsgTime = now;
+        if (socket.spamCount > 0) socket.spamCount--; 
 
-        // Üzenet vágása és szűrése
-        let finalMsg = msg.substring(0, MAX_MSG_LENGTH);
-        const cleanMsg = filterProfanity(finalMsg);
+        // --- HOSSZ LIMIT ---
+        if (msg.length > MAX_MSG_LENGTH) {
+            msg = msg.substring(0, MAX_MSG_LENGTH);
+        }
 
-        if (finalMsg !== cleanMsg) {
+        // --- KÁROMKODÁS SZŰRÉS ---
+        const cleanMsg = filterProfanity(msg);
+
+        if (msg !== cleanMsg) {
             socket.warnings++;
             if (socket.warnings >= 3) {
-                socket.emit('message', { text: "Rendszer: Káromkodás miatt kidobtunk.", from: 'system' });
+                socket.emit('message', { text: "Rendszerüzenet: Túl sokat káromkodtál! A kapcsolatot bontottuk.", from: 'system' });
                 handleDisconnect(socket, true);
+                const partnerSocket = io.sockets.sockets.get(socket.partnerId);
+                if (partnerSocket) {
+                     io.to(socket.partnerId).emit('message', { text: "Rendszerüzenet: A partnert kizártuk káromkodás miatt.", from: 'system' });
+                }
                 return;
+            } else {
+                socket.emit('message', { text: `Rendszerüzenet: Káromkodás észlelve! ${socket.warnings}/3 figyelmeztetés.`, from: 'system' });
             }
         }
 
@@ -104,19 +149,31 @@ io.on('connection', (socket) => {
     });
 
     socket.on('signal', (data) => {
-        if (socket.partnerId) io.to(socket.partnerId).emit('signal', data);
+        if (socket.partnerId) {
+            io.to(socket.partnerId).emit('signal', data);
+        }
     });
 
-    socket.on('disconnect', () => handleDisconnect(socket));
-    socket.on('next_partner', () => handleDisconnect(socket));
+    socket.on('disconnect', () => {
+        handleDisconnect(socket);
+    });
+
+    socket.on('next_partner', () => {
+        handleDisconnect(socket);
+    });
 
     function handleDisconnect(userSocket, isKicked = false) {
-        if (waitingUser === userSocket) waitingUser = null;
+        if (waitingUser === userSocket) {
+            waitingUser = null;
+        }
         if (userSocket.partnerId) {
             const partnerSocket = io.sockets.sockets.get(userSocket.partnerId);
             if (partnerSocket) {
                 partnerSocket.emit('partner_disconnected');
                 partnerSocket.partnerId = null;
+            }
+            if (isKicked) {
+                userSocket.emit('partner_disconnected');
             }
             userSocket.partnerId = null;
         }
@@ -124,4 +181,6 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Szerver: http://localhost:${PORT}`));
+server.listen(PORT, () => {
+    console.log(`Szerver fut: http://localhost:${PORT}`);
+});

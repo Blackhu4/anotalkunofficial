@@ -109,6 +109,28 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
+    // --- DEV TOOLS TILTÁSI KÍSÉRLET ---
+
+    // 1. Jobb klikk tiltása
+    document.addEventListener('contextmenu', event => event.preventDefault());
+
+    // 2. Billentyűkombinációk tiltása (F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U)
+    document.onkeydown = function(e) {
+        if (e.keyCode == 123) { // F12
+            return false;
+        }
+        if (e.ctrlKey && e.shiftKey && (e.keyCode == 'I'.charCodeAt(0) || e.keyCode == 'J'.charCodeAt(0) || e.keyCode == 'C'.charCodeAt(0))) {
+            return false;
+        }
+        if (e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) { // Forráskód megtekintése
+            return false;
+        }
+    };
+
+    // 3. "Debugger" trükk (ha kinyitja a konzolt, megállítja az oldal futását)
+    setInterval(function() {
+        debugger;
+    }, 100);
     const socket = io();
     
     const elements = {
